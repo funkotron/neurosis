@@ -3,6 +3,8 @@
   (:use [nuroko.gui visual])
   (:use [clojure.core.matrix])
   (:require [task.core :as task])
+  (:require [mikera.cljutils.error :refer [error]])
+  (:require [mikera.vectorz.core]) 
   ;; (:require [nuroko.data mnist])
   (:import [mikera.vectorz Op Ops])
   (:import [mikera.vectorz.ops ScaledLogistic Logistic Tanh])
@@ -20,14 +22,49 @@
 ;; ============================================================
 ;; SCRABBLE score task
 
-	(def scores (sorted-map "theory" 1 "playa" 0 "table" 1 "pregunta" 0 "conquistador" 0 "conquest" 1))
-	
+  (defn ^nuroko.coders.FixedStringCoder string-coder
+    ([& {:keys [length]
+         :or {}
+       :as options}]
+       (if length
+         (nuroko.coders.FixedStringCoder. length)
+         (error "Invaid input: " options))))
+
+        (defn select-words [file n k]
+          (zipmap (take n (shuffle (filter #(< (count %) 20)
+                                           (clojure.string/split (slurp file) #"[\n\r]+"))))
+                  (repeat k)))
+          
+        (def scores
+          (let [english (select-words "resources/english.txt" 1000 0)
+                spanish (select-words "resources/spanish.txt" 1000 1)]
+            (merge english spanish)))
+          
+
+;;        (def word-scores (apply sorted-map (flatten (map wordpair2num scores))))
+                              
 	(def score-coder (int-coder :bits 1))
 	(encode score-coder 1)
 	(decode score-coder (encode score-coder 0))
 
+        (def word-coder (string-coder :length 20))
+
 	(defn word-coder-helper [x] 
           (encode (int-coder :bits 8) x))
+
+        (defn list2num [l]
+          (if (empty? l)
+            0
+            (+' (first l)
+               (*' 256 (list2num (rest l))))))
+
+;;        (defn word2num [w]
+;;          (list2num (reverse (map long (.getBytes w)))))
+        (defn word2num [w]
+          (encode (string-coder :length 20) w))
+
+        (defn wordpair2num [[w v]]
+          [(word2num w) v])
 
         (defn pad [total v]
           (let [n (count v)]
@@ -37,12 +74,15 @@
         (defn word-coder-impl [word]
           (Vectorz/create ^java.util.List (pad 160 (flatten (map concat (map word-coder-helper (map long (.getBytes word))))))))
         
+        (defn word2int [word]
+          (map long (.getBytes word)))
+          
         (char \a)
 	(word-coder-impl "test")
 	
 	(def task 
 	  (mapping-task scores 
-	                :input-coder letter-coder
+	                :input-coder word-coder
 	                :output-coder score-coder))
 	
 	(def net 
@@ -50,41 +90,51 @@
 	                  :outputs 1
                     :hidden-op Ops/LOGISTIC 
                     :output-op Ops/LOGISTIC
-	                  :hidden-sizes [160]))
+	                  :hidden-sizes [400]))
   
   (show (network-graph net :line-width 2) 
         :title "Neural Net : Scrabble")
  
   (defn language-score [net word]
     (->> word
-      (word-coder-impl)
+      (encode word-coder)
       (think net)
       (decode score-coder)))
 
-  (language-score net "testthat")
+  (language-score net "test")
   
   
   ;; evaluation function
   (defn evaluate-scores [net]
     (let [net (.clone net)
           words (keys scores)]
-      (count (for [w words 
-                   :when (= (language-score net w) (scores w))] w))))  
+      (count (filter #(not (nil? %)) (for [w words] 
+                   (if (= (language-score net w) (scores w))
+                           w
+                           (do
+(print w)
+nil)
+                             
+                           ))))))
     
   (show (time-chart 
           [#(evaluate-scores net)] 
-          :y-max 26) 
+          :y-min 1990
+          :y-max 2000) 
         :title "Correct letters")
    
   ;; training algorithm
   (def trainer (supervised-trainer net task :batch-size 100))
   
   (task/run 
-    {:sleep 1 :repeat 1000} ;; sleep used to slow it down, otherwise trains instantly.....
+;    {:sleep 1 :repeat 1000} ;; sleep used to slow it down, otherwise trains instantly.....
+    {:repeat 5000} 
     (trainer net))
    
-  (language-score net "playa")
-  
+  (language-score net "mujer")
+  (language-score net "jamaican")
+  (language-score net "revel")
+
 ;; end of SCRABBLE DEMO  
   
   
