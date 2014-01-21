@@ -19,128 +19,106 @@
 
 (defn demo []
 
-;; ============================================================
-;; SCRABBLE score task
+  ;; ============================================================
+  ;; SCRABBLE score task
 
   (defn ^nuroko.coders.FixedStringCoder string-coder
     ([& {:keys [length]
          :or {}
-       :as options}]
+         :as options}]
        (if length
          (nuroko.coders.FixedStringCoder. length)
          (error "Invaid input: " options))))
 
-        (defn select-words [file n k]
-          (zipmap (take n (shuffle (filter #(< (count %) 20)
-                                           (clojure.string/split (slurp file) #"[\n\r]+"))))
-                  (repeat k)))
-          
-        (def scores
-          (let [english (select-words "resources/english.txt" 1000 0)
-                spanish (select-words "resources/spanish.txt" 1000 1)]
-            (merge english spanish)))
-          
+  (defn get-all-words-shuffled [file]
+    (shuffle (take 3000 (filter #(< (count %) 20)
+                                (clojure.string/split (slurp file) #"[\n\r]+")))))
+  
+  (def all-english-words (get-all-words-shuffled "resources/english.txt"))
+  ;;TODO refactor the following functions - DRY
+  (def training-english-words (zipmap (take (/ (count all-english-words) 2) all-english-words) (repeat 0)))
+  (def test-english-words (zipmap (drop (/ (count all-english-words) 2) all-english-words) (repeat 0)))
+  
+  (def all-spanish-words (get-all-words-shuffled "resources/spanish.txt"))
+  (def training-spanish-words (zipmap (take (/ (count all-spanish-words) 2) all-spanish-words) (repeat 1)))
+  (def test-spanish-words (zipmap (drop (/ (count all-spanish-words) 2) all-spanish-words) (repeat 1)))
 
-;;        (def word-scores (apply sorted-map (flatten (map wordpair2num scores))))
-                              
-	(def score-coder (int-coder :bits 1))
-	(encode score-coder 1)
-	(decode score-coder (encode score-coder 0))
+  
+  (def scores
+    (merge training-english-words training-spanish-words))
 
-        (def word-coder (string-coder :length 20))
 
-	(defn word-coder-helper [x] 
-          (encode (int-coder :bits 8) x))
+  (first scores)
 
-        (defn list2num [l]
-          (if (empty? l)
-            0
-            (+' (first l)
-               (*' 256 (list2num (rest l))))))
+  (def test-scores
+    (merge test-english-words test-spanish-words))
+  
+  (def score-coder (int-coder :bits 1))
+  (encode score-coder 1)
+  (decode score-coder (encode score-coder 0))
 
-;;        (defn word2num [w]
-;;          (list2num (reverse (map long (.getBytes w)))))
-        (defn word2num [w]
-          (encode (string-coder :length 20) w))
+  (def word-coder (string-coder :length 20))
 
-        (defn wordpair2num [[w v]]
-          [(word2num w) v])
-
-        (defn pad [total v]
-          (let [n (count v)]
-            (concat (take (- total n) (repeatedly (constantly 0)))
-                    v)))
-        
-        (defn word-coder-impl [word]
-          (Vectorz/create ^java.util.List (pad 160 (flatten (map concat (map word-coder-helper (map long (.getBytes word))))))))
-        
-        (defn word2int [word]
-          (map long (.getBytes word)))
-          
-        (char \a)
-	(word-coder-impl "test")
-	
-	(def task 
-	  (mapping-task scores 
-	                :input-coder word-coder
-	                :output-coder score-coder))
-	
-	(def net 
-	  (neural-network :inputs 160
-	                  :outputs 1
+  (def task 
+    (mapping-task scores 
+                  :input-coder word-coder
+                  :output-coder score-coder))
+  
+  (def net 
+    (neural-network :inputs 160
+                    :outputs 1
                     :hidden-op Ops/LOGISTIC 
                     :output-op Ops/LOGISTIC
-	                  :hidden-sizes [400]))
+                    :hidden-sizes [400]))
   
-  (show (network-graph net :line-width 2) 
-        :title "Neural Net : Scrabble")
- 
+  ;; (show (network-graph net :line-width 2) 
+  ;;       :title "Neural Net : Scrabble")
+  
   (defn language-score [net word]
     (->> word
-      (encode word-coder)
-      (think net)
-      (decode score-coder)))
+         (encode word-coder)
+         (think net)
+         (decode score-coder)))
 
-  (language-score net "test")
-  
-  
   ;; evaluation function
   (defn evaluate-scores [net]
     (let [net (.clone net)
-          words (keys scores)]
+          words (keys test-scores)]
       (count (filter #(not (nil? %)) (for [w words] 
-                   (if (= (language-score net w) (scores w))
-                           w
-                           (do
-(print w)
-nil)
-                             
-                           ))))))
-    
+                                       (if (= (language-score net w) (test-scores w))
+                                         w
+                                         (do
+                                           (print w)
+                                           nil)))))))
+  
   (show (time-chart 
-          [#(evaluate-scores net)] 
-          :y-min 1990
-          :y-max 2000) 
+         [#(evaluate-scores net)] 
+         :y-min (/ (+ (count all-english-words) (count all-spanish-words)) 4)
+         :y-max (/ (+ (count all-english-words) (count all-spanish-words)) 2)) 
         :title "Correct letters")
-   
+
+  (evaluate-scores net)
+  (+ (count test-spanish-words) (count test-english-words)) 
   ;; training algorithm
   (def trainer (supervised-trainer net task :batch-size 100))
   
   (task/run 
-;    {:sleep 1 :repeat 1000} ;; sleep used to slow it down, otherwise trains instantly.....
-    {:repeat 5000} 
-    (trainer net))
-   
+                                        ;    {:sleep 1 :repeat 1000} ;; sleep used to slow it down, otherwise trains instantly.....
+   {:repeat 1000000} 
+   (trainer net))
+  
+  ;; Test it out with some spanish and english words.
+  ;; Should return 0 for English words and 1 for Spanish
   (language-score net "mujer")
-  (language-score net "jamaican")
+  (language-score net "enjoy")
   (language-score net "revel")
 
-;; end of SCRABBLE DEMO  
+  ;; end of SCRABBLE DEMO  
   
   
   
-;; ============================================================
-;; MNIST digit recognistion task
+  ;; ============================================================
+  ;; MNIST digit recognistion task
 
   ;; ;; training data - 60,000 cases
   ;; (def data @nuroko.data.mnist/data-store)
@@ -152,7 +130,7 @@ nil)
   ;; ;; some visualisation
   ;; ;; image display function
 
-    
+  
   ;; (show (map img (take 100 data)) 
   ;;       :title "First 100 digits") 
 
@@ -202,9 +180,9 @@ nil)
   ;;       (task/run 
   ;;   {:sleep 1 :repeat true}
   ;;   (do (trainer reconstructor) (show-reconstructions)))
-    
+  
   ;; (task/stop-all)
- 
+  
   ;; ;; look at feature maps for 150 hidden units
   ;; (show (map feature-img (feature-maps compressor :scale 2)) :title "Feature maps") 
 
@@ -213,7 +191,7 @@ nil)
   ;; (def num-coder (class-coder 
   ;;                  :values (range 10)))
   ;;       (encode num-coder 3)
-	
+  
   ;;       (def recognition-task 
   ;;         (mapping-task 
   ;;     (apply hash-map 
@@ -239,7 +217,7 @@ nil)
   ;; ;; test data and task - 10,000 cases
   ;; (def test-data @nuroko.data.mnist/test-data-store)
   ;; (def test-labels @nuroko.data.mnist/test-label-store)
- 
+  
   ;; (def recognition-test-task 
   ;;         (mapping-task (apply hash-map 
   ;;                       (interleave test-data test-labels)) 
@@ -257,7 +235,7 @@ nil)
   ;;   {:sleep 1 :repeat true}
   ;;   (trainer2 recognition-network :learn-rate 0.1)) 
   ;;    ;; can tune learn-rate, lower => fine tuning => able to hit better overall accuracy
-    
+  
   ;; (task/stop-all)
   
   ;; (defn recognise [image-data]
@@ -272,7 +250,7 @@ nil)
   ;;            (take 100 labels)
   ;;            (map recognise (take 100 data))) 
   ;;       :title "Recognition results") 
-   
+  
   ;; (let [rnet (.clone recognition-network)]
   ;;   (reduce 
   ;;   (fn [acc i] (if (= (test-labels i) (->> (test-data i) (think rnet) (decode num-coder))) 
@@ -291,4 +269,4 @@ nil)
   
   ;; (show (map feature-img (feature-maps recognition-network :scale 10)) :title "Recognition maps")
   ;; (show (map feature-img (feature-maps reconstructor :scale 10)) :title "Round trip maps") 
-)
+  )
