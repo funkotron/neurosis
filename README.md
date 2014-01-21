@@ -1,10 +1,12 @@
-# neurosis
+# neurosis - spanglish
 
-A Clojure library designed to ... well, that part is up to you.
+Using a neural network [Neurokit](https://github.com/nuroko/nurokit) classify words as either Spanish or English. 
+
+Once trained for a while it reaches about 80% accuracy on un-trained words. 
 
 ## Usage
 
-FIXME
+Manually run the code from `spanglish.clj`
 
 ## License
 
